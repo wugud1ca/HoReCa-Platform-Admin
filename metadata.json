@@ -1,0 +1,6 @@
+{
+  "name": "HoReCa Agent & KDS Admin",
+  "description": "Центр управления экосистемой HoReCa Order PWA, KDS 2 Remix, собственным эквайрингом/СБП и агентскими взаиморасчетами с кафе",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

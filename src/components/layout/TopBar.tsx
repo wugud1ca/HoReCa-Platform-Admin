@@ -1,0 +1,363 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { useApp, TimePeriod } from '../../context/AppContext';
+import { ROLE_DEFINITIONS } from '../../lib/permissions';
+import { UserRole } from '../../types';
+import {
+  Search,
+  Plus,
+  Bell,
+  Calendar,
+  RefreshCw,
+  Menu,
+  ShieldAlert,
+  Inbox,
+  HandCoins,
+  ChevronDown,
+  Sparkles,
+} from 'lucide-react';
+
+interface TopBarProps {
+  setMobileOpen: (open: boolean) => void;
+  onOpenCreateAppModal: () => void;
+  onOpenCreateEstModal: () => void;
+  onOpenCreateRiskModal: () => void;
+}
+
+export const TopBar: React.FC<TopBarProps> = ({
+  setMobileOpen,
+  onOpenCreateAppModal,
+  onOpenCreateEstModal,
+  onOpenCreateRiskModal,
+}) => {
+  const {
+    currentUser,
+    switchUserRole,
+    timePeriod,
+    setTimePeriod,
+    setIsGlobalSearchOpen,
+    applications,
+    payouts,
+    riskCases,
+    navigateTo,
+    calculatePayoutsForPeriod,
+    resetAllData,
+  } = useApp();
+
+  const [isRoleMenuOpen, setIsRoleMenuOpen] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+  const roleMenuRef = useRef<HTMLDivElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const notifMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (roleMenuRef.current && !roleMenuRef.current.contains(event.target as Node)) {
+        setIsRoleMenuOpen(false);
+      }
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
+        setIsActionsMenuOpen(false);
+      }
+      if (notifMenuRef.current && !notifMenuRef.current.contains(event.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const roleMeta = ROLE_DEFINITIONS[currentUser.role];
+
+  // Urgent notifications
+  const pendingApps = applications.filter(a => a.status === 'new' || a.status === 'in_verification');
+  const activeRisks = riskCases.filter(r => r.status === 'open' || r.status === 'action_applied');
+  const pendingPayouts = payouts.filter(p => p.status === 'ready_to_pay' || p.status === 'frozen_by_risk');
+  const totalNotifications = pendingApps.length + activeRisks.length + pendingPayouts.length;
+
+  const periods: { id: TimePeriod; label: string }[] = [
+    { id: 'today', label: 'Сегодня' },
+    { id: '7days', label: '7 дней' },
+    { id: 'month', label: 'Месяц' },
+    { id: 'quarter', label: 'Квартал' },
+  ];
+
+  const rolesList: UserRole[] = ['admin', 'manager', 'accountant', 'financier', 'lawyer'];
+
+  return (
+    <header className="sticky top-0 z-30 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between gap-3 shadow-2xs">
+      {/* Left: Mobile Toggle & Global Search Trigger */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="lg:hidden p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        {/* Global Search Bar */}
+        <button
+          onClick={() => setIsGlobalSearchOpen(true)}
+          className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-500 hover:text-slate-800 hover:border-slate-400 transition-all text-xs w-48 sm:w-72 md:w-96 text-left group shadow-2xs"
+        >
+          <Search className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors shrink-0" />
+          <span className="truncate">Поиск по заведениям, ИНН, заказам...</span>
+          <kbd className="hidden sm:inline-block ml-auto px-1.5 py-0.5 text-[10px] text-slate-500 bg-white rounded border border-slate-200 font-mono shadow-2xs">
+            ⌘K
+          </kbd>
+        </button>
+      </div>
+
+      {/* Right: Period Switcher, Quick Actions, Notifications, Role Switcher */}
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {/* Period Switcher */}
+        <div className="hidden xl:flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 text-xs font-medium">
+          <Calendar className="w-3.5 h-3.5 text-slate-500 ml-1.5 mr-1" />
+          {periods.map(p => (
+            <button
+              key={p.id}
+              onClick={() => setTimePeriod(p.id)}
+              className={`px-2.5 py-1 rounded-md transition-all text-[11px] ${
+                timePeriod === p.id
+                  ? 'bg-white text-indigo-700 font-semibold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Quick Actions Dropdown */}
+        <div className="relative" ref={actionsMenuRef}>
+          <button
+            onClick={() => setIsActionsMenuOpen(!isActionsMenuOpen)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Действие</span>
+            <ChevronDown className="w-3.5 h-3.5 ml-0.5 opacity-80" />
+          </button>
+
+          {isActionsMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+              <div className="px-3 py-1.5 text-[10px] uppercase font-mono font-bold text-slate-400 border-b border-slate-100">
+                Быстрое создание
+              </div>
+              <button
+                onClick={() => {
+                  setIsActionsMenuOpen(false);
+                  onOpenCreateAppModal();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition-colors text-left"
+              >
+                <Inbox className="w-4 h-4 text-emerald-600" />
+                <span>Новая заявка на подключение</span>
+              </button>
+              {(currentUser.role === 'admin' || currentUser.role === 'manager') && (
+                <button
+                  onClick={() => {
+                    setIsActionsMenuOpen(false);
+                    onOpenCreateEstModal();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-indigo-50 hover:text-indigo-800 transition-colors text-left"
+                >
+                  <Plus className="w-4 h-4 text-indigo-600" />
+                  <span>Создать карточку заведения</span>
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setIsActionsMenuOpen(false);
+                  onOpenCreateRiskModal();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-rose-50 hover:text-rose-800 transition-colors text-left"
+              >
+                <ShieldAlert className="w-4 h-4 text-rose-600" />
+                <span>Зафиксировать инцидент риска</span>
+              </button>
+              {(currentUser.role === 'admin' || currentUser.role === 'financier' || currentUser.role === 'accountant') && (
+                <button
+                  onClick={() => {
+                    setIsActionsMenuOpen(false);
+                    calculatePayoutsForPeriod('16.08.2026 - 31.08.2026');
+                    navigateTo('payouts');
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-amber-50 hover:text-amber-800 transition-colors text-left border-t border-slate-100 mt-1"
+                >
+                  <HandCoins className="w-4 h-4 text-amber-600" />
+                  <span>Пересчитать агентские выплаты</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Notifications Dropdown */}
+        <div className="relative" ref={notifMenuRef}>
+          <button
+            onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+            className="relative p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            title="Очередь задач и уведомления"
+          >
+            <Bell className="w-4 h-4" />
+            {totalNotifications > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white"></span>
+            )}
+          </button>
+
+          {isNotificationsOpen && (
+            <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+              <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                <span className="font-semibold text-slate-900">Операционные задачи</span>
+                <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono text-[10px] font-bold">
+                  {totalNotifications} в работе
+                </span>
+              </div>
+              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                {pendingApps.length > 0 && (
+                  <div
+                    onClick={() => {
+                      setIsNotificationsOpen(false);
+                      navigateTo('applications');
+                    }}
+                    className="p-3 hover:bg-slate-50 transition-colors cursor-pointer flex items-start gap-2.5"
+                  >
+                    <Inbox className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-medium text-slate-900">
+                        {pendingApps.length} новых заявок на онбординг
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Требуется первичная проверка документов и юрлица
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {activeRisks.length > 0 && (
+                  <div
+                    onClick={() => {
+                      setIsNotificationsOpen(false);
+                      navigateTo('risks');
+                    }}
+                    className="p-3 hover:bg-slate-50 transition-colors cursor-pointer flex items-start gap-2.5"
+                  >
+                    <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-medium text-rose-700">
+                        {activeRisks.length} активных риск-инцидентов
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Необходимо согласование ограничений или закрытие кейсов
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {pendingPayouts.length > 0 && (
+                  <div
+                    onClick={() => {
+                      setIsNotificationsOpen(false);
+                      navigateTo('payouts');
+                    }}
+                    className="p-3 hover:bg-slate-50 transition-colors cursor-pointer flex items-start gap-2.5"
+                  >
+                    <HandCoins className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-medium text-slate-900">
+                        {pendingPayouts.length} выплат требуют утверждения
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Сформированы реестры для проверки финансистом
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Interactive Role Switcher */}
+        <div className="relative" ref={roleMenuRef}>
+          <button
+            onClick={() => setIsRoleMenuOpen(!isRoleMenuOpen)}
+            className="flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-300 hover:border-slate-400 transition-all group shadow-2xs"
+          >
+            <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center font-bold text-[10px] text-slate-700 border border-slate-300">
+              {currentUser.name.substring(0, 1)}
+            </div>
+            <div className="text-left hidden sm:block">
+              <div className="text-[11px] font-semibold text-slate-800 flex items-center gap-1">
+                <span>{currentUser.name.split(' ')[0]}</span>
+                <span className={`text-[9px] px-1 py-0.2 rounded font-mono font-bold border ${roleMeta.badgeColor}`}>
+                  {roleMeta.title.split(' ')[0]}
+                </span>
+              </div>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700" />
+          </button>
+
+          {isRoleMenuOpen && (
+            <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+              <div className="px-2 py-1.5 border-b border-slate-100">
+                <div className="text-[10px] uppercase font-mono font-bold text-slate-400 flex items-center justify-between">
+                  <span>Переключение роли (RBAC)</span>
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  Проверьте видимость кнопок и прав под разными ролями
+                </div>
+              </div>
+
+              <div className="space-y-1 mt-2">
+                {rolesList.map(r => {
+                  const meta = ROLE_DEFINITIONS[r];
+                  const isCurrent = currentUser.role === r;
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => {
+                        switchUserRole(r);
+                        setIsRoleMenuOpen(false);
+                      }}
+                      className={`w-full text-left p-2 rounded-lg transition-colors flex items-start justify-between ${
+                        isCurrent
+                          ? 'bg-indigo-50 border border-indigo-200 text-indigo-900'
+                          : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-semibold text-xs flex items-center gap-1.5">
+                          <span>{meta.title}</span>
+                          {isCurrent && <span className="text-emerald-600 text-[10px]">● Активен</span>}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                          {meta.description}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="border-t border-slate-100 mt-2 pt-2 flex items-center justify-between px-1">
+                <button
+                  onClick={() => {
+                    resetAllData();
+                    setIsRoleMenuOpen(false);
+                  }}
+                  className="text-[11px] text-slate-600 hover:text-amber-700 flex items-center gap-1 transition-colors font-medium"
+                >
+                  <RefreshCw className="w-3 h-3 text-slate-500" />
+                  <span>Сбросить демо-данные</span>
+                </button>
+                <span className="text-[10px] text-slate-400 font-mono">RBAC v1.2</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+};

@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+    --font-mono: 'JetBrains Mono', 'Roboto Mono', 'SF Mono', Consolas, Menlo, Monaco, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #f8fafc; /* bg-slate-50 */
+    color: #0f172a; /* text-slate-900 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Crisp scrollbar for inner containers if needed */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
