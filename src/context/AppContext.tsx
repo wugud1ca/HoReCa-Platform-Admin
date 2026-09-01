@@ -13,10 +13,17 @@ import {
   EstablishmentStatus,
   OrderStatus,
   RiskLevel,
-  UserRole
+  UserRole,
+  Invite,
+  AuthSession,
+  AuthScreenMode,
+  AuthFeatureFlags,
+  AuthLogEntry
 } from '../types';
 import {
   INITIAL_USERS,
+  INITIAL_INVITES,
+  INITIAL_AUTH_LOGS,
   INITIAL_ESTABLISHMENTS,
   INITIAL_APPLICATIONS,
   INITIAL_ORDERS,
@@ -26,6 +33,7 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_SETTINGS
 } from '../data/mockData';
+import { ROLE_DEFINITIONS } from '../lib/permissions';
 
 export type TimePeriod = 'today' | '7days' | 'month' | 'quarter' | 'year';
 
@@ -43,6 +51,34 @@ interface AppContextType {
   switchUserRole: (role: UserRole) => void;
   allUsers: InternalUser[];
   
+  // Auth & Session
+  authSession: AuthSession | null;
+  isAuthenticated: boolean;
+  isDemoMode: boolean;
+  authScreenMode: AuthScreenMode;
+  setAuthScreenMode: (mode: AuthScreenMode) => void;
+  activeInviteToken: string | null;
+  setActiveInviteToken: (token: string | null) => void;
+  resetPasswordEmail: string | null;
+  setResetPasswordEmail: (email: string | null) => void;
+  allInvites: Invite[];
+  authLogs: AuthLogEntry[];
+  featureFlags: AuthFeatureFlags;
+  
+  login: (email: string, password: string) => { success: boolean; error?: string };
+  demoLogin: (customRole?: UserRole) => void;
+  logout: () => void;
+  exitDemoMode: () => void;
+  sendForgotPassword: (email: string) => { success: boolean; message: string };
+  resetPassword: (password: string) => { success: boolean; error?: string };
+  acceptInvite: (token: string, password: string, extra?: { firstName?: string; lastName?: string }) => { success: boolean; error?: string };
+  createInvite: (data: { email: string; firstName?: string; lastName?: string; role: UserRole; team?: string }) => Invite;
+  resendInvite: (inviteId: string) => void;
+  revokeInvite: (inviteId: string) => void;
+  toggleUserBlock: (userId: string, blocked: boolean, reason?: string) => void;
+  changeUserRole: (userId: string, newRole: UserRole) => void;
+  switchActiveUser: (user: InternalUser) => void;
+
   establishments: Establishment[];
   applications: OnboardingApplication[];
   orders: Order[];
@@ -142,10 +178,48 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load initial from localStorage or mockData safely
-  const [currentUser, setCurrentUserState] = useState<InternalUser>(() =>
-    loadFromStorage('horeca_admin_current_user', INITIAL_USERS[0])
+  // Users & Invites
+  const [users, setUsers] = useState<InternalUser[]>(() =>
+    loadFromStorage('horeca_admin_users', INITIAL_USERS)
   );
+
+  const [invites, setInvites] = useState<Invite[]>(() =>
+    loadFromStorage('horeca_admin_invites', INITIAL_INVITES)
+  );
+
+  const [authLogs, setAuthLogs] = useState<AuthLogEntry[]>(() =>
+    loadFromStorage('horeca_admin_auth_logs', INITIAL_AUTH_LOGS)
+  );
+
+  // Auth Session
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() =>
+    loadFromStorage('horeca_admin_auth_session', {
+      accessToken: 'sess-super-admin-jwt-token',
+      userId: INITIAL_USERS[0].id,
+      user: INITIAL_USERS[0],
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      isDemo: false,
+    })
+  );
+
+  const [authScreenMode, setAuthScreenMode] = useState<AuthScreenMode>('login');
+  const [activeInviteToken, setActiveInviteToken] = useState<string | null>(null);
+  const [resetPasswordEmail, setResetPasswordEmail] = useState<string | null>(null);
+
+  const [featureFlags] = useState<AuthFeatureFlags>({
+    googleAuthEnabled: false,
+    magicLinkEnabled: false,
+    ssoEnabled: false,
+  });
+
+  const currentUser = useMemo(() => {
+    if (authSession?.user) return authSession.user;
+    return users[0] || INITIAL_USERS[0];
+  }, [authSession, users]);
+
+  const isAuthenticated = Boolean(authSession);
+  const isDemoMode = Boolean(authSession?.isDemo);
 
   const [establishments, setEstablishments] = useState<Establishment[]>(() =>
     loadFromStorage('horeca_admin_establishments', INITIAL_ESTABLISHMENTS)
@@ -188,8 +262,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Sync to local storage
   useEffect(() => {
-    localStorage.setItem('horeca_admin_current_user', JSON.stringify(currentUser));
-  }, [currentUser]);
+    localStorage.setItem('horeca_admin_users', JSON.stringify(users));
+  }, [users]);
+
+  useEffect(() => {
+    localStorage.setItem('horeca_admin_invites', JSON.stringify(invites));
+  }, [invites]);
+
+  useEffect(() => {
+    localStorage.setItem('horeca_admin_auth_logs', JSON.stringify(authLogs));
+  }, [authLogs]);
+
+  useEffect(() => {
+    if (authSession) {
+      localStorage.setItem('horeca_admin_auth_session', JSON.stringify(authSession));
+    } else {
+      localStorage.removeItem('horeca_admin_auth_session');
+    }
+  }, [authSession]);
 
   useEffect(() => {
     localStorage.setItem('horeca_admin_establishments', JSON.stringify(establishments));
@@ -284,20 +374,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...entry,
     };
     setAuditLogs(prev => [newLog, ...prev]);
-  };
-
-  const switchUserRole = (role: UserRole) => {
-    const user = INITIAL_USERS.find(u => u.role === role) || {
-      ...currentUser,
-      role,
-      name: `Сотрудник (${role})`,
-    };
-    setCurrentUserState(user);
-    showToast({
-      type: 'info',
-      title: 'Роль переключена',
-      message: `Текущая роль: ${user.name} [${role.toUpperCase()}]`,
-    });
   };
 
   // Convert application to establishment workflow
@@ -1358,7 +1434,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDocuments(INITIAL_DOCUMENTS);
     setAuditLogs(INITIAL_AUDIT_LOGS);
     setSettings(INITIAL_SETTINGS);
-    setCurrentUserState(INITIAL_USERS[0]);
+    setUsers(INITIAL_USERS);
+    setInvites(INITIAL_INVITES);
+    setAuthLogs(INITIAL_AUTH_LOGS);
+    setAuthSession({
+      accessToken: 'sess-super-admin-jwt-token',
+      userId: INITIAL_USERS[0].id,
+      user: INITIAL_USERS[0],
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      isDemo: false,
+    });
     localStorage.clear();
     showToast({
       type: 'info',
@@ -1367,13 +1453,513 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // Auth Methods Implementation
+  const login = (email: string, password: string): { success: boolean; error?: string } => {
+    const trimmedEmail = email.trim().toLowerCase();
+    
+    // Check if user exists in registered list
+    const foundUser = users.find(u => u.email.toLowerCase() === trimmedEmail);
+
+    if (!foundUser) {
+      // Record failed attempt
+      const failLog: AuthLogEntry = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleString('ru-RU'),
+        event: 'login_failed',
+        email: trimmedEmail,
+        ip: '192.168.1.45',
+        userAgent: navigator.userAgent,
+        details: 'Попытка входа с несуществующим адресом',
+        status: 'warning',
+      };
+      setAuthLogs(prev => [failLog, ...prev]);
+      return { success: false, error: 'Пользователь с таким email не найден в системе' };
+    }
+
+    if (foundUser.status === 'blocked') {
+      const blockLog: AuthLogEntry = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleString('ru-RU'),
+        event: 'login_failed',
+        email: trimmedEmail,
+        userId: foundUser.id,
+        ip: '192.168.1.45',
+        details: 'Попытка входа в заблокированный аккаунт',
+        status: 'error',
+      };
+      setAuthLogs(prev => [blockLog, ...prev]);
+      return { success: false, error: 'Аккаунт деактивирован. Обратитесь к главному администратору платформы.' };
+    }
+
+    // Password verification (for prototype: any non-empty >= 4 chars or standard demo pass)
+    if (!password || password.length < 4) {
+      return { success: false, error: 'Введите корректный пароль (не менее 4 символов)' };
+    }
+
+    const updatedUser: InternalUser = {
+      ...foundUser,
+      lastLogin: new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }),
+      lastLoginAt: new Date().toISOString(),
+    };
+
+    // Update in users array
+    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+
+    // Create session
+    const newSession: AuthSession = {
+      accessToken: `token-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      userId: updatedUser.id,
+      user: updatedUser,
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      isDemo: Boolean(updatedUser.isDemo),
+    };
+    setAuthSession(newSession);
+
+    // Log success
+    const successLog: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'login_success',
+      email: updatedUser.email,
+      userId: updatedUser.id,
+      ip: '192.168.1.10',
+      userAgent: navigator.userAgent,
+      details: `Успешный вход в систему (${ROLE_DEFINITIONS[updatedUser.role]?.title || updatedUser.role})`,
+      status: 'success',
+    };
+    setAuthLogs(prev => [successLog, ...prev]);
+
+    showToast({
+      type: 'success',
+      title: 'Добро пожаловать в админ-панель!',
+      message: `Вы авторизованы как ${updatedUser.name} (${ROLE_DEFINITIONS[updatedUser.role]?.title || updatedUser.role}).`
+    });
+
+    return { success: true };
+  };
+
+  const demoLogin = (customRole: UserRole = 'demo_user') => {
+    const demoUser = users.find(u => u.role === 'demo_user') || {
+      id: 'user-demo',
+      name: 'Демо Эксперт',
+      firstName: 'Демо',
+      lastName: 'Эксперт',
+      email: 'demo@horeca-platform.ru',
+      role: customRole,
+      status: 'active',
+      isDemo: true,
+      team: 'Презентационный контур',
+      lastLogin: new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }),
+      lastLoginAt: new Date().toISOString(),
+      permissions: ['demo_simulate_all'],
+    };
+
+    const newSession: AuthSession = {
+      accessToken: `demo-token-${Date.now()}`,
+      userId: demoUser.id,
+      user: { ...demoUser, role: customRole, isDemo: true },
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 12 * 3600 * 1000).toISOString(),
+      isDemo: true,
+    };
+    setAuthSession(newSession);
+
+    const log: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'demo_access',
+      email: 'demo@horeca-platform.ru',
+      userId: demoUser.id,
+      details: `Вход в Демо-режим с ролью ${ROLE_DEFINITIONS[customRole]?.title || customRole}`,
+      status: 'info',
+    };
+    setAuthLogs(prev => [log, ...prev]);
+
+    showToast({
+      type: 'info',
+      title: 'Демо-режим активирован',
+      message: 'Вы можете безопасно исследовать все модули: Заявки, Заведения, Эквайринг, KDS 2 Remix и PWA.'
+    });
+  };
+
+  const logout = () => {
+    if (authSession?.user) {
+      const log: AuthLogEntry = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleString('ru-RU'),
+        event: 'logout',
+        email: authSession.user.email,
+        userId: authSession.user.id,
+        details: 'Завершение рабочей сессии пользователем',
+        status: 'info',
+      };
+      setAuthLogs(prev => [log, ...prev]);
+    }
+    setAuthSession(null);
+    setAuthScreenMode('login');
+    showToast({
+      type: 'info',
+      title: 'Сессия завершена',
+      message: 'Вы вышли из учетной записи.'
+    });
+  };
+
+  const exitDemoMode = () => {
+    logout();
+  };
+
+  const sendForgotPassword = (email: string): { success: boolean; message: string } => {
+    const trimmed = email.trim().toLowerCase();
+    const log: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'password_reset_request',
+      email: trimmed,
+      details: 'Запрос на восстановление пароля',
+      status: 'info',
+    };
+    setAuthLogs(prev => [log, ...prev]);
+    setResetPasswordEmail(trimmed);
+
+    showToast({
+      type: 'success',
+      title: 'Ссылка для сброса пароля сгенерирована',
+      message: `Инструкция и токен для смены пароля отправлены на ${trimmed}.`
+    });
+
+    return {
+      success: true,
+      message: 'Если такой аккаунт зарегистрирован, письмо с инструкцией отправлено.'
+    };
+  };
+
+  const resetPassword = (password: string): { success: boolean; error?: string } => {
+    if (!password || password.length < 8) {
+      return { success: false, error: 'Пароль должен содержать не менее 8 символов' };
+    }
+
+    const log: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'password_reset',
+      email: resetPasswordEmail || 'user@horeca-platform.ru',
+      details: 'Успешная смена пароля по токену восстановления',
+      status: 'success',
+    };
+    setAuthLogs(prev => [log, ...prev]);
+
+    showToast({
+      type: 'success',
+      title: 'Пароль успешно изменен',
+      message: 'Теперь вы можете войти в систему с новым паролем.'
+    });
+
+    setAuthScreenMode('login');
+    return { success: true };
+  };
+
+  const acceptInvite = (
+    token: string,
+    password: string,
+    extra?: { firstName?: string; lastName?: string }
+  ): { success: boolean; error?: string } => {
+    const invite = invites.find(i => i.token === token);
+    if (!invite) {
+      return { success: false, error: 'Ссылка приглашения недействительна. Обратитесь к администратору.' };
+    }
+
+    if (invite.status === 'revoked') {
+      return { success: false, error: 'Это приглашение было отозвано администратором платформы.' };
+    }
+
+    if (invite.status === 'used') {
+      return { success: false, error: 'Это приглашение уже было активировано ранее.' };
+    }
+
+    if (new Date(invite.expiresAt).getTime() < Date.now() || invite.status === 'expired') {
+      setInvites(prev => prev.map(i => i.id === invite.id ? { ...i, status: 'expired' } : i));
+      return { success: false, error: 'Срок действия ссылки (24 часа) истек. Запросите новое приглашение у администратора.' };
+    }
+
+    if (!password || password.length < 8) {
+      return { success: false, error: 'Пароль должен быть не менее 8 символов' };
+    }
+
+    const firstName = extra?.firstName?.trim() || invite.firstName || 'Сотрудник';
+    const lastName = extra?.lastName?.trim() || invite.lastName || '';
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    const newUser: InternalUser = {
+      id: `user-${Date.now().toString(36)}`,
+      name: fullName,
+      firstName: firstName,
+      lastName: lastName,
+      email: invite.email,
+      role: invite.role,
+      team: invite.team || 'Платформа',
+      status: 'active',
+      createdAt: new Date().toISOString().substring(0, 10),
+      lastLogin: new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }),
+      lastLoginAt: new Date().toISOString(),
+      permissions: ROLE_DEFINITIONS[invite.role]?.description ? [invite.role] : [],
+    };
+
+    // Add user and mark invite as used
+    setUsers(prev => [newUser, ...prev]);
+    setInvites(prev => prev.map(i => i.id === invite.id ? { ...i, status: 'used' } : i));
+
+    const acceptLog: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'invite_accepted',
+      email: invite.email,
+      userId: newUser.id,
+      details: `Активирован инвайт на роль ${ROLE_DEFINITIONS[invite.role]?.title || invite.role}`,
+      status: 'success',
+    };
+    setAuthLogs(prev => [acceptLog, ...prev]);
+
+    // Automatically log in newly invited employee
+    const session: AuthSession = {
+      accessToken: `token-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      userId: newUser.id,
+      user: newUser,
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      isDemo: false,
+    };
+    setAuthSession(session);
+
+    showToast({
+      type: 'success',
+      title: 'Учетная запись активирована!',
+      message: `Добро пожаловать в команду платформы, ${firstName}!`
+    });
+
+    return { success: true };
+  };
+
+  const createInvite = (data: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    role: UserRole;
+    team?: string;
+  }): Invite => {
+    const token = `tok-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`;
+    const newInvite: Invite = {
+      id: `inv-${Date.now().toString(36)}`,
+      email: data.email.trim().toLowerCase(),
+      firstName: data.firstName?.trim() || '',
+      lastName: data.lastName?.trim() || '',
+      role: data.role,
+      team: data.team?.trim() || 'Операционный контур',
+      token: token,
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      status: 'pending',
+      createdBy: currentUser.name,
+      createdAt: new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }),
+    };
+
+    setInvites(prev => [newInvite, ...prev]);
+
+    const log: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'invite_created',
+      email: newInvite.email,
+      userId: currentUser.id,
+      details: `Создано приглашение на роль: ${ROLE_DEFINITIONS[data.role]?.title || data.role} (срок 24ч)`,
+      status: 'success',
+    };
+    setAuthLogs(prev => [log, ...prev]);
+
+    showToast({
+      type: 'success',
+      title: 'Приглашение создано',
+      message: `Ссылка для регистрации отправлена на ${newInvite.email} (действительна 24 часа).`
+    });
+
+    return newInvite;
+  };
+
+  const resendInvite = (inviteId: string) => {
+    setInvites(prev =>
+      prev.map(i => {
+        if (i.id !== inviteId) return i;
+        const refreshed: Invite = {
+          ...i,
+          expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          status: 'pending',
+          token: `tok-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`,
+        };
+        showToast({
+          type: 'success',
+          title: 'Приглашение переотправлено',
+          message: `Срок действия ссылки для ${i.email} продлен на 24 часа.`
+        });
+        return refreshed;
+      })
+    );
+  };
+
+  const revokeInvite = (inviteId: string) => {
+    setInvites(prev =>
+      prev.map(i => {
+        if (i.id !== inviteId) return i;
+        showToast({
+          type: 'warning',
+          title: 'Приглашение отозвано',
+          message: `Ссылка для ${i.email} аннулирована.`
+        });
+        return { ...i, status: 'revoked' };
+      })
+    );
+    const log: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'invite_revoked',
+      email: 'invite-revoke',
+      userId: currentUser.id,
+      details: `Отозван инвайт ID #${inviteId}`,
+      status: 'warning',
+    };
+    setAuthLogs(prev => [log, ...prev]);
+  };
+
+  const toggleUserBlock = (userId: string, blocked: boolean, reason?: string) => {
+    setUsers(prev =>
+      prev.map(u => {
+        if (u.id !== userId) return u;
+        const newStatus = blocked ? 'blocked' : 'active';
+        return { ...u, status: newStatus };
+      })
+    );
+
+    // If current active user got blocked, end their session
+    if (currentUser.id === userId && blocked) {
+      logout();
+    }
+
+    const log: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: blocked ? 'user_blocked' : 'user_unblocked',
+      email: 'user-management',
+      userId: currentUser.id,
+      details: `${blocked ? 'Блокировка' : 'Разблокировка'} пользователя ID #${userId}. Причина: ${reason || 'Решение администратора'}`,
+      status: blocked ? 'warning' : 'success',
+    };
+    setAuthLogs(prev => [log, ...prev]);
+
+    showToast({
+      type: blocked ? 'warning' : 'success',
+      title: blocked ? 'Пользователь заблокирован' : 'Пользователь разблокирован',
+      message: `Статус учетной записи изменен.`
+    });
+  };
+
+  const changeUserRole = (userId: string, newRole: UserRole) => {
+    setUsers(prev =>
+      prev.map(u => {
+        if (u.id !== userId) return u;
+        return { ...u, role: newRole };
+      })
+    );
+
+    if (authSession?.userId === userId) {
+      setAuthSession(prev => prev ? { ...prev, user: { ...prev.user, role: newRole } } : null);
+    }
+
+    const log: AuthLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ru-RU'),
+      event: 'role_changed',
+      email: 'user-management',
+      userId: currentUser.id,
+      details: `Пользователю #${userId} назначена роль: ${ROLE_DEFINITIONS[newRole]?.title || newRole}`,
+      status: 'info',
+    };
+    setAuthLogs(prev => [log, ...prev]);
+
+    showToast({
+      type: 'success',
+      title: 'Роль обновлена',
+      message: `Назначена новая роль: ${ROLE_DEFINITIONS[newRole]?.title || newRole}.`
+    });
+  };
+
+  const switchActiveUser = (user: InternalUser) => {
+    const session: AuthSession = {
+      accessToken: `token-${user.id}-${Date.now()}`,
+      userId: user.id,
+      user: user,
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      isDemo: Boolean(user.isDemo),
+    };
+    setAuthSession(session);
+    showToast({
+      type: 'info',
+      title: `Вход: ${user.name}`,
+      message: `Роль: ${ROLE_DEFINITIONS[user.role]?.title || user.role}`
+    });
+  };
+
+  const switchUserRole = (role: UserRole) => {
+    if (authSession?.user) {
+      const updated = { ...authSession.user, role };
+      setAuthSession({ ...authSession, user: updated });
+      setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+      showToast({
+        type: 'info',
+        title: 'Роль переключена',
+        message: `Текущая активная роль: ${ROLE_DEFINITIONS[role]?.title || role}`,
+      });
+    }
+  };
+
+  const setCurrentUserState = (user: InternalUser) => {
+    switchActiveUser(user);
+  };
+
   return (
     <AppContext.Provider
       value={{
         currentUser,
         setCurrentUser: setCurrentUserState,
         switchUserRole,
-        allUsers: INITIAL_USERS,
+        allUsers: users,
+        
+        // Auth & Session
+        authSession,
+        isAuthenticated,
+        isDemoMode,
+        authScreenMode,
+        setAuthScreenMode,
+        activeInviteToken,
+        setActiveInviteToken,
+        resetPasswordEmail,
+        setResetPasswordEmail,
+        allInvites: invites,
+        authLogs,
+        featureFlags,
+        
+        login,
+        demoLogin,
+        logout,
+        exitDemoMode,
+        sendForgotPassword,
+        resetPassword,
+        acceptInvite,
+        createInvite,
+        resendInvite,
+        revokeInvite,
+        toggleUserBlock,
+        changeUserRole,
+        switchActiveUser,
+
         establishments,
         applications,
         orders,

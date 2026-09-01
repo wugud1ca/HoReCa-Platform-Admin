@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
-import { ROLE_DEFINITIONS } from '../../lib/permissions';
+import { ROLE_DEFINITIONS, hasPermission } from '../../lib/permissions';
 import {
   LayoutDashboard,
   Inbox,
@@ -18,6 +18,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
+  Building2,
+  QrCode
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -49,7 +51,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pendingPayoutsCount = payouts.filter(p => p.status === 'ready_to_pay' || p.status === 'calculated' || p.status === 'approved').length;
   const blockedEstCount = establishments.filter(e => e.isBlocked || e.status === 'risk_limited').length;
 
-  const roleMeta = ROLE_DEFINITIONS[currentUser.role];
+  const roleMeta = ROLE_DEFINITIONS[currentUser.role] || {
+    title: currentUser.role,
+    badgeColor: 'bg-slate-100 text-slate-700',
+    description: '',
+  };
 
   interface NavItem {
     id: string;
@@ -60,16 +66,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     section?: string;
   }
 
-  const navItems: NavItem[] = [
+  const allNavItems: NavItem[] = [
     {
       id: 'dashboard',
-      label: 'Дашборд',
+      label: 'Дашборд агента',
       icon: LayoutDashboard,
       section: 'Главное',
     },
     {
       id: 'applications',
-      label: 'Заявки на подключение',
+      label: 'Заявки заведений',
       icon: Inbox,
       badge: pendingAppsCount,
       badgeColor: 'bg-emerald-100 text-emerald-800 border border-emerald-300',
@@ -77,7 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'establishments',
-      label: 'Реестр заведений',
+      label: 'Реестр кафе & ресторанов',
       icon: Store,
       badge: blockedEstCount > 0 ? blockedEstCount : undefined,
       badgeColor: 'bg-rose-100 text-rose-800 border border-rose-300',
@@ -85,25 +91,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'branches',
-      label: 'Точки и QR-режимы',
+      label: 'Точки, QR и KDS 2 Remix',
       icon: MapPin,
       section: 'Заведения',
     },
     {
       id: 'orders',
-      label: 'Заказы и продажи',
+      label: 'Заказы & Чеки СБП',
       icon: ShoppingBag,
       section: 'Операции',
     },
     {
       id: 'finance',
-      label: 'Финансовый учет',
+      label: 'Финансовый учет & Эквайринг',
       icon: CircleDollarSign,
       section: 'Финансы',
     },
     {
       id: 'payouts',
-      label: 'Агентские выплаты',
+      label: 'Выплаты кафе и комиссии',
       icon: HandCoins,
       badge: pendingPayoutsCount > 0 ? pendingPayoutsCount : undefined,
       badgeColor: 'bg-amber-100 text-amber-900 border border-amber-300',
@@ -111,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'risks',
-      label: 'Риски и блокировки',
+      label: 'Риск-мониторинг & Чарджбэки',
       icon: ShieldAlert,
       badge: criticalRisksCount > 0 ? criticalRisksCount : undefined,
       badgeColor: 'bg-red-100 text-red-800 border border-red-300 font-bold',
@@ -119,19 +125,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'documents',
-      label: 'Документооборот',
+      label: 'Агентские договоры',
       icon: FolderOpen,
       section: 'Комплаенс',
     },
     {
       id: 'users',
-      label: 'Пользователи и роли',
+      label: 'Сотрудники, Инвайты & RBAC',
       icon: Users,
       section: 'Администрирование',
     },
     {
       id: 'settings',
-      label: 'Системные настройки',
+      label: 'Настройки платформы',
       icon: Settings,
       section: 'Администрирование',
     },
@@ -142,6 +148,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       section: 'Администрирование',
     },
   ];
+
+  // Filter items by role permission
+  const navItems = allNavItems.filter(item => hasPermission.canViewTab(currentUser.role, item.id));
 
   // Group by section
   const sections = Array.from(new Set(navItems.map(i => i.section)));
@@ -168,16 +177,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => navigateTo('dashboard')}
             className="flex items-center gap-2.5 cursor-pointer overflow-hidden"
           >
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-600 to-amber-600 flex items-center justify-center shadow-xs shrink-0">
-              <Coffee className="w-5 h-5 text-white" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center shadow-xs shrink-0 text-white">
+              <Building2 className="w-5 h-5" />
             </div>
             {!isCollapsed && (
               <div className="min-w-0">
                 <div className="text-sm font-bold tracking-tight text-slate-900 whitespace-nowrap">
-                  HoReCa <span className="text-indigo-600">Admin</span>
+                  HoReCa <span className="text-emerald-600">Agent</span>
                 </div>
-                <div className="text-[10px] text-slate-500 font-mono tracking-wider uppercase">
-                  Back-Office Platform
+                <div className="text-[10px] text-slate-400 font-mono tracking-wider uppercase">
+                  PWA & KDS Back-Office
                 </div>
               </div>
             )}
@@ -194,7 +203,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* User Role Card */}
         {!isCollapsed && (
-          <div className="px-3 py-2.5 mx-2 my-2 rounded-lg bg-slate-50 border border-slate-200">
+          <div className="px-3 py-2.5 mx-2 my-2 rounded-xl bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden shrink-0 border border-slate-300">
                 {currentUser.avatar ? (
@@ -240,13 +249,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       title={isCollapsed ? item.label : undefined}
                       className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left transition-colors group relative ${
                         isActive
-                          ? 'bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200/80 shadow-2xs'
+                          ? 'bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200/80 shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                       } ${isCollapsed ? 'justify-center px-0' : ''}`}
                     >
                       <Icon
                         className={`w-4 h-4 shrink-0 transition-colors ${
-                          isActive ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'
+                          isActive ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'
                         }`}
                       />
                       {!isCollapsed && (
@@ -274,12 +283,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="p-3 border-t border-slate-200 bg-slate-50 text-[11px] text-slate-500 flex items-center justify-between">
             <div className="flex items-center gap-1.5 font-medium">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>RBAC Защищен</span>
+              <span>RBAC v2.4</span>
             </div>
-            <span className="font-mono text-[10px] text-slate-400">v2.4</span>
+            <span className="font-mono text-[10px] text-slate-400">Agent Secured</span>
           </div>
         )}
       </aside>
     </>
   );
 };
+

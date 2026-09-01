@@ -5,81 +5,167 @@ export interface RoleMeta {
   title: string;
   badgeColor: string;
   description: string;
+  accessLevel: 'full' | 'high' | 'medium' | 'low' | 'demo';
 }
 
 export const ROLE_DEFINITIONS: Record<UserRole, RoleMeta> = {
+  super_admin: {
+    role: 'super_admin',
+    title: 'Super Admin / Владелец',
+    badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    description: 'Полный неограниченный доступ ко всем разделам, ролям, модерации кафе, настройкам безопасности и журналам',
+    accessLevel: 'full',
+  },
   admin: {
     role: 'admin',
-    title: 'Администратор',
-    badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+    title: 'Super Admin (Владелец)',
+    badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     description: 'Полный доступ ко всем модулям, блокировкам, финансам, системным настройкам и ролям',
+    accessLevel: 'full',
+  },
+  admin_manager: {
+    role: 'admin_manager',
+    title: 'Admin Manager / Руководитель',
+    badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
+    description: 'Управление модерацией, просмотр кафе, принятие решений по карточкам заведений, частичный менеджмент команды',
+    accessLevel: 'high',
   },
   manager: {
     role: 'manager',
     title: 'Менеджер / Оператор',
-    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     description: 'Обработка заявок, заведение точек, операционный контроль заказов, инициирование проверок',
+    accessLevel: 'high',
+  },
+  moderator: {
+    role: 'moderator',
+    title: 'Moderator / Модератор',
+    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    description: 'Проверка анкет кафе, документов, меню, стоп-листов, статусов публикации, комментарии к карточкам',
+    accessLevel: 'medium',
+  },
+  support: {
+    role: 'support',
+    title: 'Support / Оператор',
+    badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
+    description: 'Просмотр карточек, помощь по обращениям, ограниченный доступ без права изменять критичные статусы',
+    accessLevel: 'low',
+  },
+  demo_user: {
+    role: 'demo_user',
+    title: 'Demo User / Презентация',
+    badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
+    description: 'Демонстрационный режим с мок-данными: изменения симулируются локально без записи в боевую БД',
+    accessLevel: 'demo',
   },
   accountant: {
     role: 'accountant',
     title: 'Бухгалтер',
-    badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
     description: 'Акты, начисления, сверки, первичные документы, проверка платежных реквизитов',
+    accessLevel: 'medium',
   },
   financier: {
     role: 'financier',
     title: 'Финансист',
-    badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+    badgeColor: 'bg-cyan-50 text-cyan-700 border-cyan-200',
     description: 'P&L, управление тарифами, утверждение и заморозка агентских выплат, контроль маржинальности',
+    accessLevel: 'high',
   },
   lawyer: {
     role: 'lawyer',
     title: 'Юрист',
-    badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+    badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
     description: 'Юридическая экспертиза, согласование договоров, выставление risk flags, согласование блокировок',
+    accessLevel: 'high',
   },
 };
 
+// Normalized helper for roles
+export const isSuperAdmin = (role: UserRole) => role === 'super_admin' || role === 'admin';
+export const isAdminManager = (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'manager';
+export const isModerator = (role: UserRole) => isAdminManager(role) || role === 'moderator';
+export const isSupport = (role: UserRole) => isModerator(role) || role === 'support';
+export const isDemoUser = (role: UserRole) => role === 'demo_user';
+
 export const hasPermission = {
-  // Establishments
+  // Navigation Tabs Visibility
+  canAccessTab: (role: UserRole, tabId: string): boolean => {
+    switch (tabId) {
+      case 'dashboard':
+        return true; // All roles can see dashboard
+      case 'applications':
+      case 'establishments':
+      case 'branches':
+      case 'orders':
+        return true; // All roles can view
+      case 'finance':
+      case 'payouts':
+        return isSuperAdmin(role) || role === 'admin_manager' || role === 'financier' || role === 'accountant' || role === 'demo_user';
+      case 'risks':
+        return isSuperAdmin(role) || role === 'admin_manager' || role === 'lawyer' || role === 'financier' || role === 'demo_user';
+      case 'documents':
+        return isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'lawyer' || role === 'accountant' || role === 'demo_user';
+      case 'users':
+        return isSuperAdmin(role) || role === 'admin_manager' || role === 'demo_user'; // Admin Manager has partial view
+      case 'settings':
+        return isSuperAdmin(role); // Only Super Admin
+      case 'audit':
+        return isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator';
+      default:
+        return true;
+    }
+  },
+
+  // Alias for tab view
+  canViewTab: (role: UserRole, tabId: string): boolean => {
+    return hasPermission.canAccessTab(role, tabId);
+  },
+
+  // Establishments & Moderation Actions
   canViewEstablishments: (_role: UserRole) => true,
-  canCreateEstablishment: (role: UserRole) => role === 'admin' || role === 'manager',
-  canEditGeneralData: (role: UserRole) => role === 'admin' || role === 'manager',
-  canEditLegalData: (role: UserRole) => role === 'admin' || role === 'lawyer' || role === 'manager',
-  canChangeFinancialTerms: (role: UserRole) => role === 'admin' || role === 'financier',
-  
-  // Applications & Moderation
+  canCreateEstablishment: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'manager' || role === 'demo_user',
+  canModerateEstablishment: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'demo_user',
+  canApproveRejectEstablishment: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'demo_user',
+  canEditGeneralData: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'manager' || role === 'demo_user',
+  canEditLegalData: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'lawyer' || role === 'demo_user',
+  canChangeFinancialTerms: (role: UserRole) => isSuperAdmin(role) || role === 'financier' || role === 'demo_user',
+  canBlockEstablishment: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'lawyer' || role === 'demo_user',
+  canUnblockEstablishment: (role: UserRole) => isSuperAdmin(role) || role === 'lawyer' || role === 'demo_user',
+
+  // Applications
   canViewApplications: (_role: UserRole) => true,
-  canProcessApplication: (role: UserRole) => role === 'admin' || role === 'manager',
-  canLegalReviewApplication: (role: UserRole) => role === 'admin' || role === 'lawyer',
-  canFinanceReviewApplication: (role: UserRole) => role === 'admin' || role === 'financier' || role === 'accountant',
-  canConvertApplicationToEstablishment: (role: UserRole) => role === 'admin' || role === 'manager',
+  canProcessApplication: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'manager' || role === 'demo_user',
+  canLegalReviewApplication: (role: UserRole) => isSuperAdmin(role) || role === 'lawyer' || role === 'demo_user',
+  canFinanceReviewApplication: (role: UserRole) => isSuperAdmin(role) || role === 'financier' || role === 'accountant' || role === 'demo_user',
+  canConvertApplicationToEstablishment: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'manager' || role === 'demo_user',
 
   // Orders
   canViewOrders: (_role: UserRole) => true,
-  canManageOrderIssue: (role: UserRole) => role === 'admin' || role === 'manager',
+  canManageOrderIssue: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'support' || role === 'manager' || role === 'demo_user',
 
   // Finance & Payouts
-  canViewFinance: (role: UserRole) => role === 'admin' || role === 'accountant' || role === 'financier',
-  canViewPayouts: (_role: UserRole) => true,
-  canAdjustPayout: (role: UserRole) => role === 'admin' || role === 'financier' || role === 'accountant',
-  canApprovePayout: (role: UserRole) => role === 'admin' || role === 'financier',
-  canExecutePaymentDoc: (role: UserRole) => role === 'admin' || role === 'accountant',
+  canViewFinance: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'accountant' || role === 'financier' || role === 'demo_user',
+  canViewPayouts: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'accountant' || role === 'financier' || role === 'demo_user',
+  canAdjustPayout: (role: UserRole) => isSuperAdmin(role) || role === 'financier' || role === 'accountant' || role === 'demo_user',
+  canApprovePayout: (role: UserRole) => isSuperAdmin(role) || role === 'financier' || role === 'demo_user',
+  canExecutePaymentDoc: (role: UserRole) => isSuperAdmin(role) || role === 'accountant' || role === 'demo_user',
 
-  // Risks & Blocks
-  canViewRisks: (_role: UserRole) => true,
-  canInitiateRiskCase: (role: UserRole) => role === 'admin' || role === 'manager' || role === 'lawyer' || role === 'financier',
-  canApplyRiskStop: (role: UserRole) => role === 'admin' || role === 'lawyer' || role === 'financier',
-  canBlockEstablishment: (role: UserRole) => role === 'admin' || role === 'lawyer',
-  canUnblockEstablishment: (role: UserRole) => role === 'admin' || role === 'lawyer',
+  // Risks
+  canViewRisks: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'lawyer' || role === 'financier' || role === 'demo_user',
+  canInitiateRiskCase: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'lawyer' || role === 'financier' || role === 'demo_user',
+  canApplyRiskStop: (role: UserRole) => isSuperAdmin(role) || role === 'lawyer' || role === 'financier' || role === 'demo_user',
 
   // Documents
   canViewDocuments: (_role: UserRole) => true,
-  canUploadDocuments: (role: UserRole) => role === 'admin' || role === 'manager' || role === 'lawyer' || role === 'accountant',
-  canVerifyDocuments: (role: UserRole) => role === 'admin' || role === 'lawyer' || role === 'accountant',
+  canUploadDocuments: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'lawyer' || role === 'accountant' || role === 'demo_user',
+  canVerifyDocuments: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'lawyer' || role === 'accountant' || role === 'demo_user',
 
-  // Users & Settings
-  canManageUsers: (role: UserRole) => role === 'admin',
-  canManageSystemSettings: (role: UserRole) => role === 'admin',
-  canViewFullAuditLog: (role: UserRole) => role === 'admin',
+  // Employees, Settings, and Audit
+  canManageEmployees: (role: UserRole) => isSuperAdmin(role) || role === 'demo_user',
+  canManageUsers: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'demo_user',
+  canInviteEmployees: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'demo_user',
+  canManageSystemSettings: (role: UserRole) => isSuperAdmin(role) || role === 'demo_user',
+  canViewFullAuditLog: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'demo_user',
+  canViewAuditLogs: (role: UserRole) => isSuperAdmin(role) || role === 'admin_manager' || role === 'moderator' || role === 'demo_user',
 };

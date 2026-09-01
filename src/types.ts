@@ -1,15 +1,87 @@
-export type UserRole = 'admin' | 'manager' | 'accountant' | 'financier' | 'lawyer';
+export type AdminRole = 'super_admin' | 'admin_manager' | 'moderator' | 'support' | 'demo_user';
+export type LegacyRole = 'admin' | 'manager' | 'accountant' | 'financier' | 'lawyer';
+export type UserRole = AdminRole | LegacyRole;
+
+export type UserStatus = 'active' | 'invited' | 'blocked' | 'archived' | 'inactive' | 'suspended';
 
 export interface InternalUser {
   id: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
-  phone: string;
+  phone?: string;
   role: UserRole;
   avatar?: string;
-  status: 'active' | 'inactive' | 'suspended';
-  lastLogin: string;
+  status: UserStatus;
+  isBlocked?: boolean;
+  lastLogin?: string;
+  lastLoginAt?: string;
+  createdAt?: string;
+  createdBy?: string;
+  team?: string;
+  isDemo?: boolean;
   permissions: string[];
+}
+
+export type User = InternalUser;
+
+export interface Invite {
+  id: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  role: UserRole;
+  team?: string;
+  token: string;
+  expiresAt: string; // ISO or string timestamp (e.g. +24h)
+  status: 'pending' | 'used' | 'expired' | 'revoked';
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface AuthSession {
+  accessToken: string;
+  refreshToken?: string;
+  userId: string;
+  user: InternalUser;
+  issuedAt: string;
+  expiresAt: string;
+  deviceInfo?: string;
+  ip?: string;
+  isDemo: boolean;
+}
+
+export type AuthScreenMode = 'login' | 'invite_activation' | 'forgot_password' | 'reset_password';
+
+export interface AuthFeatureFlags {
+  googleAuthEnabled: boolean;
+  magicLinkEnabled: boolean;
+  ssoEnabled: boolean;
+}
+
+export interface AuthLogEntry {
+  id: string;
+  timestamp: string;
+  event:
+    | 'login_success'
+    | 'login_failed'
+    | 'logout'
+    | 'invite_created'
+    | 'invite_accepted'
+    | 'invite_revoked'
+    | 'password_reset'
+    | 'password_reset_request'
+    | 'role_changed'
+    | 'user_blocked'
+    | 'user_unblocked'
+    | 'demo_access';
+  email: string;
+  userId?: string;
+  ip?: string;
+  userAgent?: string;
+  details?: string;
+  status: 'success' | 'warning' | 'error' | 'info';
 }
 
 export type EstablishmentStatus =
